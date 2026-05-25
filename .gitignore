@@ -1,0 +1,16 @@
+*.pyc
+__pycache__/
+*.fpk
+fnpack.exe
+# Temp scripts in project root
+/install_fpk.py
+/start_app.py
+/check_*.py
+/test_*.py
+/debug_*.py
+/fix_*.py
+/verify.py
+/read_log.py
+/cleanup.py
+/generate_icons.py
+.DS_Store

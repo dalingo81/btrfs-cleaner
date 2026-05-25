@@ -1,0 +1,129 @@
+#!/bin/bash
+set -e
+
+APP_DIR="${TRIM_APPDEST}"
+DATA_DIR="${TRIM_PKGVAR}"
+CONF_DIR="${TRIM_PKGETC}"
+LOG_DIR="${DATA_DIR}/log"
+PID_FILE="${DATA_DIR}/app.pid"
+CONF_FILE="${CONF_DIR}/config.env"
+
+log_msg() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_DIR}/lifecycle.log"
+}
+
+start_process() {
+    if status; then
+        log_msg "Already running"
+        return 0
+    fi
+
+    mkdir -p "${LOG_DIR}" "${CONF_DIR}"
+
+    PORT="5100"
+    HOST="0.0.0.0"
+    if [ -f "${CONF_FILE}" ]; then
+        source "${CONF_FILE}"
+    else
+        cat > "${CONF_FILE}" <<ENVEOF
+BTRFS_CLEANER_PORT=${PORT}
+BTRFS_CLEANER_HOST=${HOST}
+BTRFS_CLEANER_LOG_DIR=${LOG_DIR}
+ENVEOF
+    fi
+
+    PYTHON=""
+    for p in python3.11 python3.10 python3 python; do
+        if command -v $p &>/dev/null; then
+            PYTHON=$(command -v $p)
+            break
+        fi
+    done
+
+    if [ -z "$PYTHON" ]; then
+        echo "Python 3 not found!" >> "${LOG_DIR}/lifecycle.log"
+        return 1
+    fi
+
+    log_msg "Starting BtrFS Cleaner on ${HOST}:${PORT}..."
+
+    cd "${APP_DIR}/server"
+    export BTRFS_CLEANER_PORT="${PORT}"
+    export BTRFS_CLEANER_HOST="${HOST}"
+    export BTRFS_CLEANER_LOG_DIR="${LOG_DIR}"
+
+    nohup "${PYTHON}" app.py > "${LOG_DIR}/app.log" 2>&1 &
+    local pid=$!
+    echo ${pid} > "${PID_FILE}"
+    log_msg "Started with PID ${pid}"
+
+    # Wait for port
+    for i in $(seq 1 15); do
+        if bash -c "echo > /dev/tcp/127.0.0.1/${PORT}" 2>/dev/null; then
+            log_msg "Service ready on port ${PORT}"
+            return 0
+        fi
+        sleep 1
+    done
+    log_msg "WARNING: Service may not be ready"
+    return 0
+}
+
+stop_process() {
+    log_msg "Stopping BtrFS Cleaner..."
+
+    if [ -f "${PID_FILE}" ]; then
+        local pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            kill -TERM "${pid}" 2>/dev/null || true
+            local count=0
+            while kill -0 "${pid}" 2>/dev/null && [ $count -lt 10 ]; do
+                sleep 1
+                count=$((count + 1))
+            done
+            if kill -0 "${pid}" 2>/dev/null; then
+                kill -KILL "${pid}" 2>/dev/null || true
+            fi
+        fi
+        rm -f "${PID_FILE}"
+    fi
+
+    pkill -f "python.*app.py" 2>/dev/null || true
+    log_msg "Stopped."
+    return 0
+}
+
+status() {
+    if [ -f "${PID_FILE}" ]; then
+        local pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            return 0
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    return 1
+}
+
+case $1 in
+start)
+    start_process
+    exit 0
+    ;;
+stop)
+    stop_process
+    exit 0
+    ;;
+status)
+    if status; then exit 0; else exit 3; fi
+    ;;
+restart)
+    stop_process
+    sleep 1
+    start_process
+    exit 0
+    ;;
+*)
+    echo "Usage: $0 {start|stop|status|restart}"
+    exit 1
+    ;;
+esac

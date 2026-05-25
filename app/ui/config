@@ -1,0 +1,18 @@
+{
+    ".url": {
+        "btrfs-cleaner.Application": {
+            "title": "BtrFS Cleaner",
+            "desc": "BtrFS 文件系统管理面板",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "http",
+            "port": "",
+            "url": "/cgi/ThirdParty/btrfs-cleaner/proxy.cgi/",
+            "allUsers": true,
+            "control": {
+                "accessPerm": "readonly",
+                "fullUrlPerm": "readonly"
+            }
+        }
+    }
+}

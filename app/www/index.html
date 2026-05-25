@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>BtrFS Cleaner</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+header{background:#1e293b;border-bottom:1px solid #334155;padding:14px 24px;display:flex;justify-content:space-between;align-items:center}
+header h1{font-size:20px}.user{color:#94a3b8;font-size:13px}.user a{color:#3b82f6;margin-left:10px;text-decoration:none;cursor:pointer}
+.container{padding:24px;max-width:1200px;margin:0 auto}
+h2{font-size:18px;margin-bottom:14px;color:#cbd5e1}
+.fs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;margin-bottom:32px}
+.fs-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;transition:border-color .2s}
+.fs-card:hover{border-color:#3b82f6}
+.fs-title{font-size:16px;font-weight:600;margin-bottom:4px}
+.fs-uuid{font-size:11px;color:#64748b;font-family:monospace;word-break:break-all;margin-bottom:10px}
+.fs-stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0;font-size:13px}
+.stat-label{color:#94a3b8}.stat-val{color:#e2e8f0;text-align:right}
+.dev-list{font-size:12px;color:#64748b;margin-top:8px}.dev-list span{display:block}
+.pbar{background:#1e293b;border:1px solid #334155;border-radius:6px;height:10px;margin-top:8px;overflow:hidden}
+.pfill{background:linear-gradient(90deg,#3b82f6,#06b6d4);height:100%;border-radius:6px;transition:width .3s;width:0}
+.ptext{font-size:11px;color:#94a3b8;margin-top:2px}
+.btn{display:inline-block;padding:10px 18px;border-radius:8px;border:none;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s}
+.btn:hover{opacity:.85;transform:translateY(-1px)}
+.btn-pri{background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff}
+.btn-dan{background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff}
+.btn-warn{background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff}
+.btn-sm{padding:6px 12px;font-size:12px}
+.schedule-section,.history-section{margin-top:32px}
+.sform{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:16px}
+.sform select,.sform input{padding:8px 12px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#e2e8f0;font-size:13px}
+.slist{display:flex;flex-direction:column;gap:8px}
+.sitem{background:#1e293b;border:1px solid #334155;border-radius:8px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;font-size:13px}
+.jcard{background:#1e293b;border:1px solid #334155;border-radius:8px;padding:12px 16px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.jinfo{flex:1}.jmp{font-weight:600;font-size:14px}
+.jactions{display:flex;align-items:center;gap:8px}
+.jdetail{font-size:12px;color:#94a3b8;margin-top:2px}
+.badge{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.b-pending{background:#334155;color:#94a3b8}.b-running{background:#1e3a5f;color:#60a5fa}
+.b-done{background:#14532d;color:#4ade80}.b-error{background:#7f1d1d;color:#fca5a5}
+.b-cancelling{background:#78350f;color:#fbbf24}.b-cancelled{background:#451a03;color:#fcd34d}
+.empty{text-align:center;padding:40px 20px;color:#64748b}.empty p{font-size:14px;margin-top:8px}
+.refresh{color:#3b82f6;cursor:pointer;font-size:13px;margin-left:auto;text-decoration:underline;user-select:none}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<header><h1>&#x1F5C4;&#xFE0F; BtrFS Cleaner</h1>
+<span class="user">{{ user }}</span></header>
+<div class="container">
+<h2>&#x1F4CA; 存储区概览 <span class="refresh" onclick="refreshAll()">刷新</span></h2>
+<div class="fs-grid" id="fs-grid"><div class="empty"><p>加载中...</p></div></div>
+
+<div class="schedule-section">
+<h2>&#x23F0; 定时清洗计划</h2>
+<div class="sform">
+<select id="sched-mp"><option value="">-- 选择挂载点 --</option></select>
+<select id="sched-freq" onchange="onFreqChange()">
+<option value="daily">每天</option><option value="weekly">每周</option><option value="monthly">每月</option></select>
+<span id="weekday-picker" style="display:none">
+<select id="sched-dow"><option value="0">周一</option><option value="1">周二</option><option value="2">周三</option><option value="3">周四</option><option value="4">周五</option><option value="5">周六</option><option value="6">周日</option></select></span>
+<span id="dom-picker" style="display:none">
+<input type="number" id="sched-dom" min="1" max="28" value="1" style="width:80px;text-align:center"></span>
+<span style="color:#94a3b8;font-size:13px">执行时间</span>
+<input type="number" id="sched-hour" min="0" max="23" value="3" style="width:80px;text-align:center">
+<span style="color:#94a3b8;font-size:13px">:</span>
+<input type="number" id="sched-min" min="0" max="59" value="0" style="width:80px;text-align:center">
+<button class="btn btn-pri btn-sm" onclick="addSchedule()">添加计划</button>
+</div>
+<div class="slist" id="schedule-list"></div>
+</div>
+
+<div class="history-section">
+<h2>&#x1F50D; 清洗任务 <span class="refresh" onclick="refreshJobs()">刷新</span></h2>
+<div id="job-list"></div>
+</div>
+</div>
+
+<script>
+const API = (() => {
+  async function req(path, opts={}) {
+    // Use relative path so browser navigates through proxy.cgi
+    const res = await fetch('api/' + path.replace(/^\//,''), {
+      credentials: 'same-origin',
+      method: opts.method || 'GET',
+      headers: opts.body ? {'Content-Type': 'application/json'} : {},
+      body: opts.body ? JSON.stringify(opts.body) : undefined
+    });
+    return res.json();
+  }
+  return {
+    status: () => req('status'),
+    startScrub: mp => req('scrub', {method:'POST', body:{mountpoint:mp}}),
+    scrubStatus: () => req('scrub/status'),
+    cancelScrub: jid => req('scrub/'+jid+'/cancel', {method:'POST'}),
+    deleteJob: jid => req('scrub/'+jid, {method:'DELETE'}),
+    schedules: () => req('schedules'),
+    addSchedule: d => req('schedules', {method:'POST', body:d}),
+    deleteSchedule: sid => req('schedules/'+sid, {method:'DELETE'}),
+  };
+})();
+
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function escAttr(s){return(s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+
+function initApp(){ loadFS(); loadJobs(); loadScheds(); onFreqChange(); setInterval(()=>{loadFS();loadScheds()},30000); }
+
+async function loadFS(){
+  try{
+    const fss=await API.status(), g=document.getElementById('fs-grid'), s=document.getElementById('sched-mp');
+    s.innerHTML='<option value="">-- 选择挂载点 --</option>';
+    if(!fss.length){g.innerHTML='<div class="empty"><p>&#x26A0;&#xFE0F; 未检测到 btrfs 文件系统</p></div>';return}
+    g.innerHTML=fss.map(f=>{
+      const mp=f.mountpoint||'(未挂载)',pct=f.percent||'?',pn=f.percent_num||0,cl=pn>90?'#ef4444':pn>70?'#f59e0b':'#3b82f6';
+      return '<div class="fs-card"><div class="fs-title">'+esc(f.label||mp)+'</div>'
+        +'<div class="fs-uuid">'+esc(f.uuid)+'</div>'
+        +'<div class="fs-stats"><span class="stat-label">挂载点</span><span class="stat-val">'+esc(mp)+'</span>'
+        +'<span class="stat-label">总容量</span><span class="stat-val">'+esc(f.total)+'</span>'
+        +'<span class="stat-label">已用</span><span class="stat-val">'+esc(f.used)+'</span>'
+        +'<span class="stat-label">可用</span><span class="stat-val">'+esc(f.avail)+'</span></div>'
+        +'<div class="pbar"><div class="pfill" style="width:'+pn+'%;background:'+cl+'"></div></div>'
+        +'<div class="ptext">使用率 '+esc(pct)+'</div>'
+        +'<div class="dev-list">'+(f.devices||[]).map(d=>'<span>&#x1F4BF; '+esc(d.path)+' ('+esc(d.size)+')</span>').join('')+'</div>'
+        +(f.mountpoint?'<button class="btn btn-pri btn-sm" style="margin-top:10px" onclick="startScrub(\''+escAttr(mp)+'\')">&#x1F527; 手动清洗</button>':'')
+        +'</div>';
+    }).join('');
+    fss.forEach(f=>{if(f.mountpoint){let o=document.createElement('option');o.value=f.mountpoint;o.textContent=f.mountpoint;s.appendChild(o)}});
+  }catch(e){console.error(e)}
+}
+
+function onFreqChange(){
+  const v=document.getElementById('sched-freq').value;
+  document.getElementById('weekday-picker').style.display=v==='weekly'?'inline':'none';
+  document.getElementById('dom-picker').style.display=v==='monthly'?'inline':'none';
+}
+
+function renderJobs(jobs,el){
+  if(!el)el=document.getElementById('job-list');
+  if(!jobs.length){el.innerHTML='<div class="empty"><p>暂无清洗任务</p></div>';return}
+  const stLabel={pending:'等待中',running:'运行中',done:'已完成',error:'出错',cancelling:'取消中',cancelled:'已取消'};
+  el.innerHTML=jobs.map(j=>{
+    const sc='b-'+j.status,st=stLabel[j.status]||j.status,pct=j.progress||0;
+    return '<div class="jcard"><div class="jinfo"><div class="jmp">&#x1F4C2; '+esc(j.mountpoint)+'</div>'
+      +'<div class="jdetail">'+esc(j.detail||'')+'</div>'
+      +(j.status==='running'?'<div class="pbar" style="margin-top:4px"><div class="pfill" style="width:'+pct+'%"></div></div><div class="ptext">'+pct.toFixed(1)+'%</div>':'')
+      +'</div><div class="jactions">'
+      +((j.status==='running'||j.status==='pending')?'<button class="btn btn-warn btn-sm" onclick="cancelScrub(\''+j.id+'\')">停止</button>':'')
+      +((j.status==='done'||j.status==='error'||j.status==='cancelled')?'<button class="btn btn-dan btn-sm" onclick="deleteJob(\''+j.id+'\')">删除</button>':'')
+      +'<span class="badge '+sc+'">'+st+'</span></div></div>';
+  }).join('');
+}
+
+async function loadJobs(){try{const r=await API.scrubStatus();renderJobs(r)}catch(e){console.error(e)}}
+async function loadScheds(){
+  try{const ss=await API.schedules(),e=document.getElementById('schedule-list');
+    if(!ss.length){e.innerHTML='<div class="empty"><p>暂无定时计划</p></div>';return}
+    e.innerHTML=ss.map(s=>'<div class="sitem"><span>&#x1F4C2; '+esc(s.mountpoint)+' — &#x23F0; '+(s.description||'')+'</span>'
+      +'<button class="btn btn-dan btn-sm" onclick="delSched(\''+s.id+'\')">删除</button></div>').join('');
+  }catch(e){console.error(e)}
+}
+
+async function startScrub(mp){if(!confirm('确定对 "'+mp+'" 执行数据清洗吗？'))return;const d=await API.startScrub(mp);if(d.error)alert(d.error);loadJobs()}
+async function cancelScrub(jid){if(!confirm('确定停止？'))return;await API.cancelScrub(jid)}
+async function deleteJob(jid){if(!confirm('确定删除？'))return;await API.deleteJob(jid);loadJobs()}
+async function addSchedule(){
+  const mp=document.getElementById('sched-mp').value,freq=document.getElementById('sched-freq').value;
+  const h=parseInt(document.getElementById('sched-hour').value),m=parseInt(document.getElementById('sched-min').value);
+  if(!mp){alert('请选择挂载点');return}
+  const body={mountpoint:mp,hour:h,minute:m,frequency:freq};
+  if(freq==='weekly')body.day_of_week=parseInt(document.getElementById('sched-dow').value);
+  if(freq==='monthly')body.day_of_month=parseInt(document.getElementById('sched-dom').value);
+  await API.addSchedule(body);loadScheds();
+}
+async function delSched(id){if(!confirm('确定删除？'))return;await API.deleteSchedule(id);loadScheds()}
+function refreshAll(){loadFS();loadJobs()}
+function refreshJobs(){loadJobs()}
+setInterval(()=>loadJobs(),2000);
+initApp();
+</script>
+</body></html>

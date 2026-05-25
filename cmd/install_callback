@@ -1,0 +1,54 @@
+#!/bin/bash
+set -e
+
+APP_DIR="${TRIM_APPDEST}"
+DATA_DIR="${TRIM_PKGVAR}"
+CONF_DIR="${TRIM_PKGETC}"
+LOG_DIR="${DATA_DIR}/log"
+
+mkdir -p "${APP_DIR}" "${DATA_DIR}" "${LOG_DIR}" "${CONF_DIR}"
+
+PYTHON=""
+for p in python3.11 python3.10 python3 python; do
+    if command -v $p &>/dev/null; then
+        PYTHON=$(command -v $p)
+        break
+    fi
+done
+[ -z "$PYTHON" ] && { echo "Python 3 not found!" > "${TRIM_TEMP_LOGFILE}"; exit 1; }
+
+# Install Python packages (Debian 12+ requires --break-system-packages)
+${PYTHON} -m pip install --break-system-packages flask apscheduler 2>/dev/null || \
+    ${PYTHON} -m pip install flask apscheduler 2>/dev/null || {
+        echo "WARNING: Could not install flask/apscheduler" >> "${TRIM_TEMP_LOGFILE}"
+    }
+
+# Verify critical packages
+echo "---"
+${PYTHON} -c "import flask; print('flask:', flask.__version__)" 2>&1 || echo "WARNING: flask import failed"
+${PYTHON} -c "import apscheduler; print('apscheduler:', apscheduler.__version__)" 2>&1 || echo "WARNING: apscheduler import failed"
+
+# Ensure proxy.cgi dependency
+if ! command -v curl &>/dev/null; then
+    apt-get install -y -qq curl 2>/dev/null || true
+fi
+
+# Create config
+PORT="${wizard_port:-5100}"
+cat > "${CONF_DIR}/config.env" <<ENVEOF
+BTRFS_CLEANER_PORT=${PORT}
+BTRFS_CLEANER_HOST=0.0.0.0
+BTRFS_CLEANER_LOG_DIR=${LOG_DIR}
+ENVEOF
+
+# sudoers for passwordless btrfs commands
+# Use the btrfs user/group that app runs as (from privilege config)
+if [ ! -f /etc/sudoers.d/btrfs-cleaner ]; then
+    mkdir -p /etc/sudoers.d
+    echo "# Allow btrfs-cleaner to run btrfs scrub without password" > /etc/sudoers.d/btrfs-cleaner
+    echo "ALL ALL=(ALL) NOPASSWD: ***" >> /etc/sudoers.d/btrfs-cleaner
+    chmod 440 /etc/sudoers.d/btrfs-cleaner 2>/dev/null || true
+fi
+
+echo "Install completed. Port: ${PORT}"
+exit 0

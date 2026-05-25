@@ -1,0 +1,20 @@
+#!/bin/bash
+set -e
+APP_DIR="${TRIM_APPDEST}"
+
+PYTHON=""
+for p in python3.11 python3.10 python3 python; do
+    if command -v $p &>/dev/null; then
+        PYTHON=$(command -v $p)
+        break
+    fi
+done
+[ -z "$PYTHON" ] && { echo "Python not found" > "${TRIM_TEMP_LOGFILE}"; exit 1; }
+
+# Reinstall critical packages (Debian 12+ needs --break-system-packages)
+${PYTHON} -m pip install --break-system-packages flask apscheduler 2>/dev/null || \
+    ${PYTHON} -m pip install flask apscheduler 2>/dev/null || true
+
+# Ensure CGI proxy permissions
+chmod +x "${APP_DIR}/ui/proxy.cgi" 2>/dev/null || true
+exit 0

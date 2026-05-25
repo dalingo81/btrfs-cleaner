@@ -1,0 +1,4 @@
+#!/bin/bash
+# Clean up sudoers entry
+rm -f /etc/sudoers.d/btrfs-cleaner 2>/dev/null || true
+exit 0

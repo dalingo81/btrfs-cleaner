@@ -1,0 +1,17 @@
+appname               = btrfs-cleaner
+version               = 1.2.1
+display_name          = BtrFS Cleaner
+desc                  = BtrFS 文件系统管理面板。支持 Scrub 调度执行、实时进度查看、文件系统状态监控。
+platform              = all
+source                = thirdparty
+maintainer            = dalingo
+maintainer_url        = https://github.com/openclaw/btrfs-cleaner
+distributor           = dalingo
+distributor_url       = 
+os_min_version        = 0.8.0
+desktop_uidir         = ui
+desktop_applaunchname = btrfs-cleaner.Application
+service_port          = 5100
+checkport             = false
+ctl_stop              = true
+disable_authorization_path = true
