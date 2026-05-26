@@ -1,6 +1,5 @@
 *.pyc
 __pycache__/
-*.fpk
 fnpack.exe
 # Temp scripts in project root
 /install_fpk.py
